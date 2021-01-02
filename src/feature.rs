@@ -15,7 +15,7 @@
 use std::convert::TryFrom;
 
 use crate::errors::Error;
-use crate::json::{Deserialize, Deserializer, JsonObject, JsonValue, Serialize, Serializer};
+use crate::json::{Deserialize, JsonObject, JsonValue, Serialize, SerializeMap, Serializer};
 use crate::serde_json::json;
 use crate::{util, Feature};
 
@@ -146,27 +146,31 @@ impl Serialize for Feature {
     where
         S: Serializer,
     {
-        JsonObject::from(self).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Feature {
-    fn deserialize<D>(deserializer: D) -> Result<Feature, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error as SerdeError;
-
-        let val = JsonObject::deserialize(deserializer)?;
-
-        Feature::from_json_object(val).map_err(|e| D::Error::custom(e.to_string()))
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("type", "Feature")?;
+        map.serialize_entry("geometry", &self.geometry)?;
+        if let Some(bbox) = &self.bbox {
+            map.serialize_entry("bbox", bbox)?;
+        }
+        if let Some(id) = &self.id {
+            map.serialize_entry("id", id)?;
+        }
+        if let Some(props) = &self.properties {
+            map.serialize_entry("properties", props)?;
+        }
+        if let Some(members) = &self.foreign_members {
+            for (k, v) in members.iter() {
+                map.serialize_entry(k, v)?;
+            }
+        }
+        map.end()
     }
 }
 
 /// Feature identifier
 ///
 /// [GeoJSON Format Specification § 3.2](https://tools.ietf.org/html/rfc7946#section-3.2)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub enum Id {
     String(String),
     Number(serde_json::Number),
@@ -189,8 +193,7 @@ mod tests {
     use crate::{feature, Error, Feature, GeoJson, Geometry, Value};
 
     fn feature_json_str() -> &'static str {
-        "{\"geometry\":{\"coordinates\":[1.1,2.1],\"type\":\"Point\"},\"properties\":{},\"type\":\
-         \"Feature\"}"
+        "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[1.1,2.1]},\"properties\":{}}"
     }
 
     fn properties() -> Option<crate::json::JsonObject> {
@@ -266,8 +269,7 @@ mod tests {
     #[test]
     fn test_display_feature() {
         let f = feature().to_string();
-        assert_eq!(f, "{\"geometry\":{\"coordinates\":[1.1,2.1],\"type\":\"Point\"},\"properties\":{},\"type\":\
-         \"Feature\"}");
+        assert_eq!(f, "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[1.1,2.1]},\"properties\":{}}");
     }
 
     #[test]
@@ -296,7 +298,7 @@ mod tests {
 
     #[test]
     fn encode_decode_feature_with_id_number() {
-        let feature_json_str = "{\"geometry\":{\"coordinates\":[1.1,2.1],\"type\":\"Point\"},\"id\":0,\"properties\":{},\"type\":\"Feature\"}";
+        let feature_json_str = "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[1.1,2.1]},\"id\":0,\"properties\":{}}";
         let feature = crate::Feature {
             geometry: Some(Geometry {
                 value: Value::Point(vec![1.1, 2.1]),
@@ -322,7 +324,7 @@ mod tests {
 
     #[test]
     fn encode_decode_feature_with_id_string() {
-        let feature_json_str = "{\"geometry\":{\"coordinates\":[1.1,2.1],\"type\":\"Point\"},\"id\":\"foo\",\"properties\":{},\"type\":\"Feature\"}";
+        let feature_json_str = "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[1.1,2.1]},\"id\":\"foo\",\"properties\":{}}";
         let feature = crate::Feature {
             geometry: Some(Geometry {
                 value: Value::Point(vec![1.1, 2.1]),
@@ -372,7 +374,7 @@ mod tests {
     fn encode_decode_feature_with_foreign_member() {
         use crate::json::JsonObject;
         use serde_json;
-        let feature_json_str = "{\"geometry\":{\"coordinates\":[1.1,2.1],\"type\":\"Point\"},\"other_member\":\"some_value\",\"properties\":{},\"type\":\"Feature\"}";
+        let feature_json_str = "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[1.1,2.1]},\"properties\":{},\"other_member\":\"some_value\"}";
         let mut foreign_members = JsonObject::new();
         foreign_members.insert(
             String::from("other_member"),

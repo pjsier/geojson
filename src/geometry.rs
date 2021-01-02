@@ -15,8 +15,7 @@
 use std::{convert::TryFrom, fmt};
 
 use crate::errors::Error;
-use crate::json::{Deserialize, Deserializer, JsonObject, JsonValue, Serialize, Serializer};
-use crate::serde;
+use crate::json::{Deserialize, JsonObject, JsonValue, Serialize, SerializeMap, Serializer};
 use crate::{util, Bbox, LineStringType, PointType, PolygonType};
 
 /// The underlying value for a `Geometry`.
@@ -44,7 +43,8 @@ use crate::{util, Bbox, LineStringType, PointType, PolygonType};
 /// # fn test() {}
 /// # test()
 /// ```
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(tag = "type", content = "coordinates")]
 pub enum Value {
     /// Point
     ///
@@ -140,7 +140,7 @@ impl TryFrom<JsonValue> for Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        ::serde_json::to_string(&JsonObject::from(self))
+        ::serde_json::to_string(self)
             .map_err(|_| fmt::Error)
             .and_then(|s| f.write_str(&s))
     }
@@ -166,7 +166,38 @@ impl Serialize for Value {
     where
         S: Serializer,
     {
-        JsonValue::from(self).serialize(serializer)
+        let mut map = serializer.serialize_map(Some(2))?;
+        match self {
+            Value::Point(ref g) => {
+                map.serialize_entry("type", "Point")?;
+                map.serialize_entry("coordinates", g)?;
+            }
+            Value::MultiPoint(ref g) => {
+                map.serialize_entry("type", "MultiPoint")?;
+                map.serialize_entry("coordinates", g)?;
+            }
+            Value::LineString(ref g) => {
+                map.serialize_entry("type", "LineString")?;
+                map.serialize_entry("coordinates", g)?;
+            }
+            Value::MultiLineString(ref g) => {
+                map.serialize_entry("type", "MultiLineString")?;
+                map.serialize_entry("coordinates", g)?;
+            }
+            Value::Polygon(ref g) => {
+                map.serialize_entry("type", "Polygon")?;
+                map.serialize_entry("coordinates", g)?;
+            }
+            Value::MultiPolygon(ref g) => {
+                map.serialize_entry("type", "MultiPolygon")?;
+                map.serialize_entry("coordinates", g)?;
+            }
+            Value::GeometryCollection(ref g) => {
+                map.serialize_entry("type", "GeometryCollection")?;
+                map.serialize_entry("geometries", g)?;
+            }
+        };
+        map.end()
     }
 }
 
@@ -201,7 +232,7 @@ impl Serialize for Value {
 /// let geojson_string = geometry.to_string();
 ///
 /// assert_eq!(
-///     "{\"coordinates\":[7.428959,1.513394],\"type\":\"Point\"}",
+///     "{\"type\":\"Point\",\"coordinates\":[7.428959,1.513394]}",
 ///     geojson_string,
 /// );
 /// ```
@@ -211,7 +242,7 @@ impl Serialize for Value {
 /// ```
 /// use geojson::{GeoJson, Geometry, Value};
 ///
-/// let geojson_str = "{\"coordinates\":[7.428959,1.513394],\"type\":\"Point\"}";
+/// let geojson_str = "{\"type\":\"Point\",\"coordinates\":[7.428959,1.513394]}";
 ///
 /// let geometry = match geojson_str.parse::<GeoJson>() {
 ///     Ok(GeoJson::Geometry(g)) => g,
@@ -223,16 +254,20 @@ impl Serialize for Value {
 ///     geometry,
 /// );
 /// ```
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Geometry {
     /// Bounding Box
     ///
     /// [GeoJSON Format Specification § 5](https://tools.ietf.org/html/rfc7946#section-5)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bbox: Option<Bbox>,
+    #[serde(flatten)]
     pub value: Value,
     /// Foreign Members
     ///
     /// [GeoJSON Format Specification § 6](https://tools.ietf.org/html/rfc7946#section-6)
+    #[serde(flatten, deserialize_with = "util::deserialize_foreign_members")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub foreign_members: Option<JsonObject>,
 }
 
@@ -301,28 +336,6 @@ impl TryFrom<JsonValue> for Geometry {
     }
 }
 
-impl Serialize for Geometry {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        JsonObject::from(self).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Geometry {
-    fn deserialize<D>(deserializer: D) -> Result<Geometry, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error as SerdeError;
-
-        let val = JsonObject::deserialize(deserializer)?;
-
-        Geometry::from_json_object(val).map_err(|e| D::Error::custom(e.to_string()))
-    }
-}
-
 impl<V> From<V> for Geometry
 where
     V: Into<Value>,
@@ -347,7 +360,7 @@ mod tests {
 
     #[test]
     fn encode_decode_geometry() {
-        let geometry_json_str = "{\"coordinates\":[1.1,2.1],\"type\":\"Point\"}";
+        let geometry_json_str = "{\"type\":\"Point\",\"coordinates\":[1.1,2.1]}";
         let geometry = Geometry {
             value: Value::Point(vec![1.1, 2.1]),
             bbox: None,
@@ -395,7 +408,7 @@ mod tests {
         let v = Value::LineString(vec![vec![0.0, 0.1], vec![0.1, 0.2], vec![0.2, 0.3]]);
         let geometry = Geometry::new(v);
         assert_eq!(
-            "{\"coordinates\":[[0.0,0.1],[0.1,0.2],[0.2,0.3]],\"type\":\"LineString\"}",
+            "{\"type\":\"LineString\",\"coordinates\":[[0.0,0.1],[0.1,0.2],[0.2,0.3]]}",
             geometry.to_string()
         );
     }
@@ -404,7 +417,7 @@ mod tests {
     fn test_value_display() {
         let v = Value::LineString(vec![vec![0.0, 0.1], vec![0.1, 0.2], vec![0.2, 0.3]]);
         assert_eq!(
-            "{\"coordinates\":[[0.0,0.1],[0.1,0.2],[0.2,0.3]],\"type\":\"LineString\"}",
+            "{\"type\":\"LineString\",\"coordinates\":[[0.0,0.1],[0.1,0.2],[0.2,0.3]]}",
             v.to_string()
         );
     }
@@ -412,7 +425,7 @@ mod tests {
     #[test]
     fn encode_decode_geometry_with_foreign_member() {
         let geometry_json_str =
-            "{\"coordinates\":[1.1,2.1],\"other_member\":true,\"type\":\"Point\"}";
+            "{\"type\":\"Point\",\"coordinates\":[1.1,2.1],\"other_member\":true}";
         let mut foreign_members = JsonObject::new();
         foreign_members.insert(
             String::from("other_member"),
@@ -455,7 +468,7 @@ mod tests {
             foreign_members: None,
         };
 
-        let geometry_collection_string = "{\"geometries\":[{\"coordinates\":[100.0,0.0],\"type\":\"Point\"},{\"coordinates\":[[101.0,0.0],[102.0,1.0]],\"type\":\"LineString\"}],\"type\":\"GeometryCollection\"}";
+        let geometry_collection_string = "{\"type\":\"GeometryCollection\",\"geometries\":[{\"type\":\"Point\",\"coordinates\":[100.0,0.0]},{\"type\":\"LineString\",\"coordinates\":[[101.0,0.0],[102.0,1.0]]}]}";
         // Test encode
         let json_string = encode(&geometry_collection);
         assert_eq!(json_string, geometry_collection_string);

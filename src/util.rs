@@ -13,8 +13,17 @@
 // limitations under the License.
 
 use crate::errors::Error;
-use crate::json::{JsonObject, JsonValue};
+use crate::json::{Deserialize, Deserializer, JsonObject, JsonValue};
 use crate::{feature, Bbox, Feature, Geometry, Position, Value};
+
+pub fn deserialize_foreign_members<'de, D>(d: D) -> Result<Option<JsonObject>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Deserialize::deserialize(d)
+        .map(|m: Option<JsonObject>| m.unwrap_or_default())
+        .map(|m| if m.is_empty() { None } else { Some(m) })
+}
 
 pub fn expect_type(value: &mut JsonObject) -> Result<String, Error> {
     let prop = expect_property(value, "type")?;

@@ -42,7 +42,8 @@ use std::str::FromStr;
 /// let feature2: Feature = geojson.try_into().unwrap();
 /// ```
 /// [GeoJSON Format Specification § 3](https://tools.ietf.org/html/rfc7946#section-3)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(tag = "type")]
 pub enum GeoJson {
     Geometry(Geometry),
     Feature(Feature),
@@ -250,7 +251,7 @@ impl TryFrom<JsonValue> for GeoJson {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
 enum Type {
     Point,
     MultiPoint,
@@ -285,22 +286,14 @@ impl Serialize for GeoJson {
     where
         S: Serializer,
     {
-        JsonObject::from(self).serialize(serializer)
+        match self {
+            GeoJson::Geometry(ref g) => g.serialize(serializer),
+            GeoJson::Feature(ref f) => f.serialize(serializer),
+            GeoJson::FeatureCollection(ref f) => f.serialize(serializer),
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for GeoJson {
-    fn deserialize<D>(deserializer: D) -> Result<GeoJson, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error as SerdeError;
-
-        let val = JsonObject::deserialize(deserializer)?;
-
-        GeoJson::from_json_object(val).map_err(|e| D::Error::custom(e.to_string()))
-    }
-}
 
 /// # Example
 ///```

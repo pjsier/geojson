@@ -15,7 +15,7 @@
 use std::convert::TryFrom;
 
 use crate::errors::Error;
-use crate::json::{Deserialize, Deserializer, JsonObject, JsonValue, Serialize, Serializer};
+use crate::json::{Deserialize, JsonObject, JsonValue, Serialize, SerializeMap, Serializer};
 use crate::serde_json::json;
 use crate::{util, Bbox, Feature};
 
@@ -43,11 +43,11 @@ use crate::{util, Bbox, Feature};
 ///
 /// assert_eq!(
 ///     serialized,
-///     "{\"features\":[],\"type\":\"FeatureCollection\"}"
+///     "{\"type\":\"FeatureCollection\",\"features\":[]}"
 /// );
 /// # }
 /// ```
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct FeatureCollection {
     /// Bounding Box
     ///
@@ -57,7 +57,28 @@ pub struct FeatureCollection {
     /// Foreign Members
     ///
     /// [GeoJSON Format Specification § 6](https://tools.ietf.org/html/rfc7946#section-6)
+    #[serde(flatten, deserialize_with = "util::deserialize_foreign_members")]
     pub foreign_members: Option<JsonObject>,
+}
+
+impl Serialize for FeatureCollection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("type", "FeatureCollection")?;
+        if let Some(bbox) = &self.bbox {
+            map.serialize_entry("bbox", bbox)?;
+        }
+        if let Some(members) = &self.foreign_members {
+            for (k, v) in members.iter() {
+                map.serialize_entry(k, v)?;
+            }
+        }
+        map.serialize_entry("features", &self.features)?;
+        map.end()
+    }
 }
 
 impl<'a> From<&'a FeatureCollection> for JsonObject {
@@ -120,27 +141,5 @@ impl TryFrom<JsonValue> for FeatureCollection {
         } else {
             Err(Error::GeoJsonExpectedObject(value))
         }
-    }
-}
-
-impl Serialize for FeatureCollection {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        JsonObject::from(self).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for FeatureCollection {
-    fn deserialize<D>(deserializer: D) -> Result<FeatureCollection, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error as SerdeError;
-
-        let val = JsonObject::deserialize(deserializer)?;
-
-        FeatureCollection::from_json_object(val).map_err(|e| D::Error::custom(e.to_string()))
     }
 }

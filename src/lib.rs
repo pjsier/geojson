@@ -299,7 +299,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #[cfg(feature = "geo-types")]
 use geo_types;
-use serde;
+use serde::{self, Deserialize};
 use serde_json;
 
 /// Bounding Boxes
@@ -341,7 +341,7 @@ pub use conversion::quick_collection;
 /// Feature Objects
 ///
 /// [GeoJSON Format Specification § 3.2](https://tools.ietf.org/html/rfc7946#section-3.2)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Feature {
     /// Bounding Box
     ///
@@ -362,10 +362,12 @@ pub struct Feature {
     /// Foreign Members
     ///
     /// [GeoJSON Format Specification § 6](https://tools.ietf.org/html/rfc7946#section-6)
+    #[serde(flatten, deserialize_with = "util::deserialize_foreign_members")]
     pub foreign_members: Option<json::JsonObject>,
 }
 
 mod json {
+    pub use serde::ser::SerializeMap;
     pub use serde::{Deserialize, Deserializer, Serialize, Serializer};
     pub use serde_json::{Map, Value as JsonValue};
     pub type JsonObject = Map<String, JsonValue>;
